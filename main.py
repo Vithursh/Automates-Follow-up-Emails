@@ -93,26 +93,14 @@ def scan_flagged_emails(df):
                 # Get the sender again (already done above, but kept for clarity)
                 sender = msg.SenderEmailAddress.lower()
 
-                # Get the current time
-                # now = datetime.now()
-                # 1. Define your timezone clearly
-
-                # eastern = pytz.timezone('US/Eastern')
-                # now = datetime.now(eastern)
-
                 # Option A: Make everything timezone-aware (UTC)
                 now = datetime.now().replace(tzinfo=None)
                 # 2. Force 'received_time' to be naive
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
-                # received_time = received_time.astimezone(timezone.utc) if received_time.tzinfo else received_time.replace(tzinfo=timezone.utc)
 
                 # Check if this sender already exists in our tracking CSV
                 if sender not in df["email"].values:
-                    # If they exist, update their last seen date and schedule next follow-up
-                    # df.loc[df["email"] == sender, "last_seen_date"] = now
-                    # df.loc[df["email"] == sender, "next_followup_due"] = now + timedelta(days=FOLLOWUP_DAYS)
-                # else:
                     # If they don't exist, create a new row with their info
                     new_row = {
                         "email": sender,
@@ -121,21 +109,10 @@ def scan_flagged_emails(df):
                         "last_seen_date": now,
                         "next_followup_due": now + timedelta(days=FOLLOWUP_DAYS)
                     }
-                    # new_entry = pd.DataFrame([new_row]) # Let pandas infer the correct datetime dtypes
-                    # # Ensure existing df columns are datetimes so they match new_entry
-                    # df['sent_date'] = pd.to_datetime(df['sent_date']) 
-                    # df = pd.concat([df, new_entry], ignore_index=True)
 
                     # 2. DO NOT use .astype(object). Let pandas keep native datetime dtypes.
                     new_entry = pd.DataFrame([new_row])  # Create a DataFrame for the new row
 
-                    # 3. Ensure existing 'df' columns match the timezone before concat
-                    # If df is empty, this won't hurt. If it has data, it prevents alignment errors.
-                    # for col in ["sent_date", "flagged_date", "last_seen_date", "next_followup_due"]:
-                    #     if col in df.columns:
-                    #         df[col] = pd.to_datetime(df[col]).dt.tz_convert('US/Eastern')
-
-                    # df = pd.concat([df, new_entry], ignore_index=True)
                     # Create a list of DataFrames to join
                     to_concat = [df, new_entry]
 
@@ -147,12 +124,12 @@ def scan_flagged_emails(df):
                     else:
                         # If both were empty, you can just keep the original df or create a fresh one
                         df = df 
-                else:
-                    # If they exist, update their last seen date and schedule next follow-up
-                    if msg.FlagStatus != 2:
-                        # remove from tracking if unflagged
-                        df = df[df["email"] != sender]
-                        print(f"Removed {sender} from tracking because it was unflagged")
+            else:
+                # If the sender exists, and they are unflagged in inbox, remove them from tracking
+                if df["email"].isin([sender]).any():
+                    # remove from tracking if unflagged
+                    df = df[df["email"] != sender]
+                    print(f"Removed {sender} from tracking because it was unflagged")
 
         # If any error occurs while processing an email, print the error and continue
         except Exception as e:
