@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 CSV_FILE = "email_tracking.csv"
 CHECK_INTERVAL = 30  # seconds
-FOLLOWUP_DAYS = 7
+FOLLOWUP_DAYS = 1
 
 SUBJECT_TEXT = "Follow up on the analysis report"
 BODY_TEXT = "Hi, just following up on my previous message. Let me know when you get a chance."
@@ -19,6 +19,7 @@ def init_csv():
     if not os.path.exists(CSV_FILE):
         df = pd.DataFrame(columns=[
             "email",
+            "subject_line",
             "sent_date",
             "flagged_date",
             "last_seen_date",
@@ -48,13 +49,11 @@ def get_outlook_inbox():
     inbox = outlook.GetDefaultFolder(6)  # 6 = Inbox
     return inbox
 
-# global new_row
 
 # -------------------------------
 # Scan flagged emails today
 # -------------------------------
 def scan_flagged_emails(df):
-    # Print status message to console
     print("Scanning for flagged emails...")
     
     # Get the Outlook inbox folder
@@ -69,10 +68,11 @@ def scan_flagged_emails(df):
 
     # Get today's date to filter only today's emails
     today = datetime.now().date()
-    print(f"Today's date: {today}")
 
     # Loop through each email in the inbox
     for msg in messages:
+        print("The loaded dataframe is:", df)
+        # print("The emails currently being tracked are:", tracked_emails["email"].tolist())
         # Print debug info for each message
         print("Messages today:", msg)
         
@@ -99,11 +99,13 @@ def scan_flagged_emails(df):
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
 
-                # Check if this sender already exists in our tracking CSV
-                if sender not in df["email"].values:
+                # Check if this sender does not exist in our tracking CSV
+                print(f"Email from CSV file: {df['email'].tolist()}")  # Print current tracked emails
+                if not (df["email"] == sender).any():
                     # If they don't exist, create a new row with their info
                     new_row = {
                         "email": sender,
+                        "subject_line": msg.Subject,
                         "sent_date": received_time,
                         "flagged_date": now,
                         "last_seen_date": now,
@@ -126,7 +128,7 @@ def scan_flagged_emails(df):
                         df = df 
             else:
                 # If the sender exists, and they are unflagged in inbox, remove them from tracking
-                if df["email"].isin([sender]).any():
+                if df["email"].isin([sender]).any() and df["subject_line"].isin([msg.Subject]).any():
                     # remove from tracking if unflagged
                     df = df[df["email"] != sender]
                     print(f"Removed {sender} from tracking because it was unflagged")
@@ -134,7 +136,6 @@ def scan_flagged_emails(df):
         # If any error occurs while processing an email, print the error and continue
         except Exception as e:
             print(f"Error processing email: {e}")
-            # print(f"Type of new_row: {type(new_row)})")
 
     # Return the updated dataframe with all flagged emails
     return df
