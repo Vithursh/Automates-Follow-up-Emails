@@ -3,14 +3,15 @@ import pandas as pd
 import os
 import time
 import pytz
+import time
 from datetime import datetime, timedelta, timezone
 
 CSV_FILE = "email_tracking.csv"
 CHECK_INTERVAL = 30  # seconds
-FOLLOWUP_DAYS = 1
+FOLLOWUP_DAYS = 7 # 7 days until next follow-up if no response
 
 SUBJECT_TEXT = "Follow up on the analysis report"
-BODY_TEXT = "Hi, just following up on my previous message. Let me know when you get a chance."
+BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance.\n\nThanks,\nTrench Group"
 
 # -------------------------------
 # Initialize CSV if not exists
@@ -136,7 +137,7 @@ def scan_flagged_emails(df):
 # -------------------------------
 # Send follow-up email
 # -------------------------------
-def send_email(to_address):
+def send_email(to_address, subject_line):
     outlook = win32com.client.Dispatch("Outlook.Application")
     mail = outlook.CreateItem(0)
 
@@ -146,6 +147,43 @@ def send_email(to_address):
 
     mail.Send()
     print(f"Follow-up sent to {to_address}")
+
+    print("Email has been sent, going to unflagged the email in the inbox...")
+    time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
+
+    # Get the Outlook inbox folder
+    inbox = get_outlook_inbox()
+    
+    # Get all messages (emails) from the inbox
+    messages = inbox.Items
+    
+    # Sort emails by received time in descending order (newest first)
+    messages.Sort("[ReceivedTime]", True)
+
+    # Loop through each email in the inbox
+    for msg in messages:
+        try:
+            sender = msg.SenderEmailAddress.lower()
+            if sender == to_address and msg.Subject == subject_line:
+                print(f"Found email from {to_address} with subject {subject_line} for follow-up.")
+                # Check if it's a standard email (MailItem)
+                if msg.Class == 43: # 43 is the constant for olMail
+                    print("Unflagging the email...")
+                    
+                    # This one line removes the flag, the task status, and all dates
+                    msg.ClearTaskFlag()
+                    
+                    # Explicitly ensure FlagStatus is reset
+                    msg.FlagStatus = 0 
+                    
+                    msg.Save()
+                else:
+                    print(f"Skipping non-email item (Class: {msg.Class})")
+        except Exception as e:
+            print(f"Error processing email: {e}")
+    
+    print("Email should have been unflagged")
+    time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
 
 # -------------------------------
 # Check and send follow-ups
@@ -158,7 +196,7 @@ def process_followups(df):
             continue
 
         if now >= row["next_followup_due"]:
-            send_email(row["email"])
+            send_email(row["email"], row['subject_line'])
 
             # Schedule next follow-up again (repeat cycle)
             df.at[index, "next_followup_due"] = now + timedelta(days=FOLLOWUP_DAYS)
