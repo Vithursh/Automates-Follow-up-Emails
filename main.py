@@ -66,9 +66,6 @@ def scan_flagged_emails(df):
     # Sort emails by received time in descending order (newest first)
     messages.Sort("[ReceivedTime]", True)
 
-    # Get today's date to filter only today's emails
-    today = datetime.now().date()
-
     # Loop through each email in the inbox
     for msg in messages:
         print("The loaded dataframe is:", df)
@@ -79,10 +76,6 @@ def scan_flagged_emails(df):
         try:
             # Get the time the email was received
             received_time = msg.ReceivedTime
-            
-            # If the email is from before today, stop checking (older emails)
-            if received_time.date() != today:
-                break  # Stop the loop since we only want today's emails
 
             # Get the sender's email address and convert to lowercase
             sender = msg.SenderEmailAddress.lower()
