@@ -93,9 +93,12 @@ def scan_flagged_emails(df):
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
 
+                # Check if this EXACT subject from this EXACT sender is already logged
+                is_duplicate = ((df["email"] == sender) & (df["subject_line"] == msg.Subject)).any()
+
                 # Check if this sender does not exist in our tracking CSV
                 print(f"Email from CSV file: {df['email'].tolist()}")  # Print current tracked emails
-                if not (df["email"] == sender).any():
+                if not is_duplicate:
                     # If they don't exist, create a new row with their info
                     new_row = {
                         "email": sender,
@@ -148,8 +151,8 @@ def send_email(to_address, subject_line):
     mail.Send()
     print(f"Follow-up sent to {to_address}")
 
-    print("Email has been sent, going to unflagged the email in the inbox...")
-    time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
+    # print("Email has been sent, going to unflagged the email in the inbox...")
+    # time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
 
     # Get the Outlook inbox folder
     inbox = get_outlook_inbox()
@@ -182,8 +185,8 @@ def send_email(to_address, subject_line):
         except Exception as e:
             print(f"Error processing email: {e}")
     
-    print("Email should have been unflagged")
-    time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
+    # print("Email should have been unflagged")
+    # time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
 
 # -------------------------------
 # Check and send follow-ups
