@@ -2,18 +2,17 @@ import win32com.client
 import pandas as pd
 import os
 import time
-import pytz
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 CSV_FILE = "email_tracking.csv"
 CHECK_INTERVAL = 30  # seconds
 # FOLLOWUP_DAYS = 7 # 7 days until next follow-up if no response
-# FOLLOWUP_MINUTES = 5 # 5 minutes until next follow-up if no response
-FOLLOWUP_HOURS = 1 # 1 hour until next follow-up if no response
+FOLLOWUP_MINUTES = 5 # 5 minutes until next follow-up if no response
+# FOLLOWUP_HOURS = 1 # 1 hour until next follow-up if no response
 
 SUBJECT_TEXT = "Follow up on the analysis report"
 BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance.\n\nThanks,\nTrench Group"
+
 
 # -------------------------------
 # Initialize CSV if not exists
@@ -66,58 +65,61 @@ def get_outlook_sent_items():
 
 
 # -------------------------------
+# Helper: get all recipient emails from a message
+# -------------------------------
+def get_all_recipients(msg):
+    """Returns a comma-separated string of all recipient email addresses."""
+    all_recipients = []
+    for i in range(1, msg.Recipients.Count + 1):
+        r = msg.Recipients.Item(i)
+        try:
+            if r.AddressEntry.Type == "EX":
+                all_recipients.append(r.AddressEntry.GetExchangeUser().PrimarySmtpAddress.lower())
+            else:
+                all_recipients.append(r.Address.lower())
+        except:
+            pass
+    return ", ".join(all_recipients) if all_recipients else None
+
+
+# -------------------------------
 # Scan flagged emails today
 # -------------------------------
 def scan_flagged_emails(df):
     print("Scanning for flagged emails...")
-    
-    # Get the Outlook sent items folder
+
     sent_items = get_outlook_sent_items()
-    
-    # Get all messages (emails) from the inbox
     messages = sent_items.Items
-    print(f"Total emails in inbox: {len(messages)}")
-    
-    # Sort emails by received time in descending order (newest first)
+    print(f"Total emails in sent items: {len(messages)}")
+
     messages.Sort("[ReceivedTime]", True)
 
-    # Loop through each email in the Sent Items folder
     for msg in messages:
         try:
-            # 1. Use SentOn instead of ReceivedTime for Sent Items
             received_time = msg.SentOn
 
-            # Get the recipient's email address (not sender, since this is Sent Items)
-            recipient_email = None
-            if msg.Recipients.Count > 0:
-                recipient = msg.Recipients.Item(1)
-                try:
-                    # For Exchange users, get the PrimarySmtpAddress
-                    if recipient.AddressEntry.Type == "EX":
-                        recipient_email = recipient.AddressEntry.GetExchangeUser().PrimarySmtpAddress.lower()
-                    else:
-                        recipient_email = recipient.Address.lower()
-                except:
-                    recipient_email = recipient.Address.lower()
-            
+            # CHANGED: collect all recipients instead of just the first one
+            recipient_email = get_all_recipients(msg)
+
             if recipient_email is None:
                 print("Skipping email with no recipients.")
                 continue
-            
+
             print(f"Scanning sent email to: {recipient_email}")
 
-            # Check if this email has been flagged for follow-up
             if msg.FlagStatus == 2:
                 print(f"Email to {recipient_email} with subject '{msg.Subject}' is flagged for follow-up.")
-                # print(f"Email to {sender} with subject '{msg.Subject}' status of flag is:", msg.flagstatus)
-                # Force 'received_time' (SentOn) to be naive
+
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
-                
+
                 now = datetime.now().replace(tzinfo=None)
 
-                # Check if this EXACT subject to this EXACT person is already logged
-                is_duplicate = ((df["email"] == recipient_email) & (df["subject_line"] == msg.Subject) & (df["sent_date"] == received_time)).any()
+                is_duplicate = (
+                    (df["email"] == recipient_email) &
+                    (df["subject_line"] == msg.Subject) &
+                    (df["sent_date"] == received_time)
+                ).any()
 
                 if not is_duplicate:
                     print(f"Adding new entry for follow-up with {recipient_email}")
@@ -128,51 +130,38 @@ def scan_flagged_emails(df):
                         "flagged_date": now,
                         "last_seen_date": now,
                         # "next_followup_due": now + timedelta(days=FOLLOWUP_DAYS)
-                        # "next_followup_due": now + timedelta(minutes=FOLLOWUP_MINUTES)
-                        "next_followup_due": now + timedelta(hours=FOLLOWUP_HOURS)
+                        "next_followup_due": now + timedelta(minutes=FOLLOWUP_MINUTES)
+                        # "next_followup_due": now + timedelta(hours=FOLLOWUP_HOURS)
                     }
 
-                    # 2. DO NOT use .astype(object). Let pandas keep native datetime dtypes.
-                    new_entry = pd.DataFrame([new_row])  # Create a DataFrame for the new row
-
-                    # Create a list of DataFrames to join
+                    new_entry = pd.DataFrame([new_row])
                     to_concat = [df, new_entry]
-
-                    # Only include DataFrames that are not empty
                     valid_dfs = [d for d in to_concat if not d.empty]
 
                     if valid_dfs:
                         df = pd.concat(valid_dfs, ignore_index=True)
-                    else:
-                        # If both were empty, you can just keep the original df or create a fresh one
-                        df = df 
+
             else:
-                # If they are unflagged, remove from tracking
-                # Use the 'sender' variable which now holds the recipient's address
-                # Force the email's received_time to be naive to match the CSV column
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
 
-                # Now calculate is_logged
-                is_logged = ((df["email"] == recipient_email) & 
-                            (df["subject_line"] == msg.Subject) & 
-                            (df["sent_date"] == received_time)).any()
+                is_logged = (
+                    (df["email"] == recipient_email) &
+                    (df["subject_line"] == msg.Subject) &
+                    (df["sent_date"] == received_time)
+                ).any()
 
                 if is_logged:
-                    # Remove only that specific email thread
-                    df = df[~((df["email"] == recipient_email) & 
-                            (df["subject_line"] == msg.Subject) & 
-                            (df["sent_date"] == received_time))]
+                    df = df[~(
+                        (df["email"] == recipient_email) &
+                        (df["subject_line"] == msg.Subject) &
+                        (df["sent_date"] == received_time)
+                    )]
                     print(f"Removed {recipient_email} from tracking because it was unflagged.")
-                # else:
-                #     print("Received_time on file is:\n", df["sent_date"])
-                #     print("Received_time of email is:", received_time)
-                    # print(f"Email to {sender} with subject '{msg.Subject}', recived_time on file is:", df["sent_date"], "and:", received_time)
 
         except Exception as e:
             print(f"Error scanning email: {e}")
 
-    # Return the updated dataframe with all flagged emails
     return df
 
 
@@ -183,29 +172,28 @@ def send_email(to_address, subject_line, sent_date):
     outlook = win32com.client.Dispatch("Outlook.Application")
     mail = outlook.CreateItem(0)
 
-    mail.To = to_address
+    # Replace all commas (",") with semicolons (";")
+    formatted_emails = to_address.replace(",", ";")
+
+    print("The email address is:", formatted_emails)
+    # print("The email type is:", type(to_address))
+
+    mail.To = formatted_emails  # Outlook handles comma-separated addresses natively
     mail.Subject = SUBJECT_TEXT
     mail.Body = BODY_TEXT
 
     mail.Send()
     print(f"Follow-up sent to {to_address}")
 
-    # print("Email has been sent, going to unflagged the email in the inbox...")
-    # time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
-
-    # Get the Outlook sent items folder
     sent_items = get_outlook_sent_items()
-    
-    # Get all messages (emails) from the inbox
     messages = sent_items.Items
-    
-    # Sort emails by received time in descending order (newest first)
     messages.Sort("[ReceivedTime]", True)
 
-    # Loop through each email in the inbox
+    # CHANGED: split to_address so we can match any one of the recipients
+    tracked_recipients = [e.strip() for e in to_address.split(",")]
+
     for msg in messages:
         try:
-            # Get the recipient's email address from Sent Items
             recipient_email = None
             if msg.Recipients.Count > 0:
                 recipient = msg.Recipients.Item(1)
@@ -218,31 +206,23 @@ def send_email(to_address, subject_line, sent_date):
                     recipient_email = recipient.Address.lower()
             else:
                 continue
-            
-            # Get the email's sent time (SentOn) and make it naive for comparison
+
             received_time = msg.SentOn
             if received_time.tzinfo is not None:
                 received_time = received_time.replace(tzinfo=None)
-            if recipient_email == to_address and msg.Subject == subject_line and sent_date == received_time:
-                print(f"Found email from {to_address} with subject {subject_line} for follow-up.")
-                # Check if it's a standard email (MailItem)
-                if msg.Class == 43: # 43 is the constant for olMail
-                    print("Unflagging the email...")
-                    
-                    # This one line removes the flag, the task status, and all dates
+
+            # CHANGED: check if recipient is in the tracked list, not exact string match
+            if recipient_email in tracked_recipients and msg.Subject == subject_line and sent_date == received_time:
+                print(f"Found email to {recipient_email} with subject '{subject_line}' — unflagging.")
+                if msg.Class == 43:
                     msg.ClearTaskFlag()
-                    
-                    # Explicitly ensure FlagStatus is reset
-                    msg.FlagStatus = 0 
-                    
+                    msg.FlagStatus = 0
                     msg.Save()
                 else:
                     print(f"Skipping non-email item (Class: {msg.Class})")
+
         except Exception as e:
-            print(f"Error sending email: {e}")
-    
-    # print("Email should have been unflagged")
-    # time.sleep(30)  # Wait a few seconds to ensure the email is sent before checking the inbox again
+            print(f"Error unflagging email: {e}")
 
 
 # -------------------------------
@@ -256,41 +236,34 @@ def process_followups(df):
             continue
 
         if now >= row["next_followup_due"]:
+            # Save before sending to prevent duplicate emails on crash
+            df.at[index, "next_followup_due"] = now + timedelta(minutes=FOLLOWUP_MINUTES)
+            # df.at[index, "next_followup_due"] = now + timedelta(hours=FOLLOWUP_HOURS)
+            # df.at[index, "next_followup_due"] = now + timedelta(days=FOLLOWUP_DAYS)
+            save_data(df)
             send_email(row["email"], row['subject_line'], row['sent_date'])
 
-            # Schedule next follow-up again (repeat cycle)
-            # df.at[index, "next_followup_due"] = now + timedelta(days=FOLLOWUP_DAYS)
-            # df.at[index, "next_followup_due"] = now + timedelta(minutes=FOLLOWUP_MINUTES)
-            df.at[index, "next_followup_due"] = now + timedelta(hours=FOLLOWUP_HOURS)
-
-        # Get the Outlook inbox folder
         inbox_messages = get_outlook_inbox()
-        # Get the Outlook sent items folder
         sent_items = get_outlook_sent_items()
 
-        # Get all messages (emails) from the inbox
         inbox_messages = inbox_messages.Items
-        # Get all messages (emails) from the inbox
         sent_messages = sent_items.Items
 
-        # Sort emails by received time in descending order (newest first)
         inbox_messages.Sort("[ReceivedTime]", True)
-        # Sort emails by received time in descending order (newest first)
         sent_messages.Sort("[ReceivedTime]", True)
+
+        # CHANGED: split the stored comma-separated recipients into a list
+        tracked_recipients = [e.strip() for e in row["email"].split(",")]
 
         for msg_inbox in inbox_messages:
             try:
-                # DIAGNOSIS: Check if it's actually an email (Class 43 = olMail)
                 if msg_inbox.Class != 43:
-                    # Skip meeting requests (53), reports (46), etc.
-                    continue 
+                    continue
 
-                # Use getattr to safely check for the Sender property
                 current_sender_obj = getattr(msg_inbox, "Sender", None)
                 if not current_sender_obj:
                     continue
 
-                # Get the sender's email address and convert to lowercase
                 if msg_inbox.SenderEmailType == "EX":
                     sender = msg_inbox.Sender.GetExchangeUser().PrimarySmtpAddress.lower()
                 else:
@@ -298,13 +271,12 @@ def process_followups(df):
 
                 print("Email in inbox:", sender)
 
-                if sender == row["email"] and row['subject_line'] in msg_inbox.Subject and now <= row["next_followup_due"]:
-                    # If client sends a follow back before automated follow-up is sent, we should stop the cycle and remove them from tracking
-                    print(f"Email from {row['email']} sent a follow up before automated follow-up was sent.")
-                    # Check if it's a standard email (MailItem)
+                # CHANGED: check if sender is in the tracked recipients list
+                if sender in tracked_recipients and row['subject_line'] in msg_inbox.Subject and now <= row["next_followup_due"]:
+                    print(f"Reply detected from {sender} — stopping follow-up cycle.")
+
                     for msg_sent in sent_messages:
                         try:
-                            # Get the recipient's email address (not sender, since this is Sent Items)
                             recipient_email = None
                             if msg_sent.Recipients.Count > 0:
                                 recipient = msg_sent.Recipients.Item(1)
@@ -317,31 +289,24 @@ def process_followups(df):
                                     recipient_email = recipient.Address.lower()
                             else:
                                 continue
-                            
-                            # Get the email's sent time (SentOn) and make it naive for comparison
+
                             received_time = msg_sent.SentOn
                             if received_time.tzinfo is not None:
                                 received_time = received_time.replace(tzinfo=None)
-                            if recipient_email == row["email"] and row['subject_line'] == msg_sent.Subject and row['sent_date'] == received_time:
-                                print("Email in inbox:", recipient_email)
-                                # If client sends a follow back before automated follow-up is sent, we should stop the cycle and remove them from tracking
-                                print(f"Email from {row['email']} sent a follow up before automated follow-up was sent.")
-                                # Check if it's a standard email (MailItem)
-                                if msg_sent.Class == 43: # 43 is the constant for olMail
-                                    print("Unflagging the email...")
-                                    
-                                    # This one line removes the flag, the task status, and all dates
+
+                            # CHANGED: check if first recipient is in the tracked list
+                            if recipient_email in tracked_recipients and row['subject_line'] == msg_sent.Subject and row['sent_date'] == received_time:
+                                print(f"Unflagging original email to {recipient_email}...")
+                                if msg_sent.Class == 43:
                                     msg_sent.ClearTaskFlag()
-                                    
-                                    # Explicitly ensure FlagStatus is reset
-                                    msg_sent.FlagStatus = 0 
-                                    
+                                    msg_sent.FlagStatus = 0
                                     msg_sent.Save()
-                                # break  # No need to check further emails
+
                         except Exception as e:
-                            print(f"Error processing email: {e}")
+                            print(f"Error processing sent email: {e}")
+
             except Exception as e:
-                print(f"Error processing email: {e}")
+                print(f"Error processing inbox email: {e}")
 
     return df
 
