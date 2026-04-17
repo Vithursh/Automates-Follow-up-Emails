@@ -6,9 +6,8 @@ from datetime import datetime, timedelta
 
 CSV_FILE = "email_tracking.csv"
 CHECK_INTERVAL = 30  # seconds
-# FOLLOWUP_DAYS = 7 # 7 days until next follow-up if no response
-FOLLOWUP_MINUTES = 5 # 5 minutes until next follow-up if no response
-# FOLLOWUP_HOURS = 1 # 1 hour until next follow-up if no response
+FOLLOWUP_TIME_TYPE = "hours" # Change to "days", "hours", or "minutes" exactly
+FOLLOWUP_TIME = 1 # Days, Hours, or Minutes until next follow-up if no response
 
 SUBJECT_TEXT = "Follow up on the analysis report"
 BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance.\n\nThanks,\nTrench Group"
@@ -25,6 +24,8 @@ def init_csv():
             "sent_date",
             "flagged_date",
             "last_seen_date",
+            "sent_time_duration_type",
+            "sent_time_duration_value",
             "next_followup_due"
         ], dtype="object")
         df.to_csv(CSV_FILE, index=False)
@@ -129,9 +130,9 @@ def scan_flagged_emails(df):
                         "sent_date": received_time,
                         "flagged_date": now,
                         "last_seen_date": now,
-                        # "next_followup_due": now + timedelta(days=FOLLOWUP_DAYS)
-                        "next_followup_due": now + timedelta(minutes=FOLLOWUP_MINUTES)
-                        # "next_followup_due": now + timedelta(hours=FOLLOWUP_HOURS)
+                        "sent_time_duration_type": FOLLOWUP_TIME_TYPE,
+                        "sent_time_duration_value": FOLLOWUP_TIME,
+                        "next_followup_due": now + timedelta(**{FOLLOWUP_TIME_TYPE: FOLLOWUP_TIME})
                     }
 
                     new_entry = pd.DataFrame([new_row])
@@ -168,7 +169,7 @@ def scan_flagged_emails(df):
 # -------------------------------
 # Send follow-up email
 # -------------------------------
-def send_email(to_address, subject_line, sent_date):
+def send_email(to_address, subject_line, sent_date, index, now, df):
     outlook = win32com.client.Dispatch("Outlook.Application")
     mail = outlook.CreateItem(0)
 
@@ -214,13 +215,11 @@ def send_email(to_address, subject_line, sent_date):
             # CHANGED: check if recipient is in the tracked list, not exact string match
             if recipient_email in tracked_recipients and msg.Subject == subject_line and sent_date == received_time:
                 print(f"Found email to {recipient_email} with subject '{subject_line}' — unflagging.")
-                if msg.Class == 43:
-                    msg.ClearTaskFlag()
-                    msg.FlagStatus = 0
-                    msg.Save()
-                else:
-                    print(f"Skipping non-email item (Class: {msg.Class})")
-
+                # Update the next follow up based on the FOLLOWUP_TIME_TYPE and FOLLOWUP_TIME that was set when the email was flaggsed
+                df.at[index, "next_followup_due"] = now + timedelta(**{df.at[index, "sent_time_duration_type"]: int(df.at[index, "sent_time_duration_value"])})
+                print(f"For {recipient_email} setting next follow-up due to {df.at[index, 'next_followup_due']} based on sent_time_duration_type and sent_time_duration_value.")
+                # Store in the CSV for the specific row
+                df.to_csv("email_tracking.csv", index=False)
         except Exception as e:
             print(f"Error unflagging email: {e}")
 
@@ -237,11 +236,9 @@ def process_followups(df):
 
         if now >= row["next_followup_due"]:
             # Save before sending to prevent duplicate emails on crash
-            df.at[index, "next_followup_due"] = now + timedelta(minutes=FOLLOWUP_MINUTES)
-            # df.at[index, "next_followup_due"] = now + timedelta(hours=FOLLOWUP_HOURS)
-            # df.at[index, "next_followup_due"] = now + timedelta(days=FOLLOWUP_DAYS)
+            df.at[index, "next_followup_due"] = now + timedelta(**{FOLLOWUP_TIME_TYPE: FOLLOWUP_TIME})
             save_data(df)
-            send_email(row["email"], row['subject_line'], row['sent_date'])
+            send_email(row["email"], row['subject_line'], row['sent_date'], index, now, df)
 
         inbox_messages = get_outlook_inbox()
         sent_items = get_outlook_sent_items()
@@ -316,6 +313,10 @@ def process_followups(df):
 # -------------------------------
 def main():
     print("Starting Outlook automation...")
+    
+    # Validate configuration
+    if FOLLOWUP_TIME_TYPE not in ["days", "hours", "minutes"]:
+        raise ValueError(f"Invalid FOLLOWUP_TIME_TYPE: '{FOLLOWUP_TIME_TYPE}'. Must be 'days', 'hours', or 'minutes'.")
 
     init_csv()
 
