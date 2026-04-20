@@ -264,8 +264,9 @@ def send_email(to_address, subject_line, sent_date, index, now, df):
     # print("The email type is:", type(to_address))
 
     mail.To = formatted_emails  # Outlook handles comma-separated addresses natively
-    mail.Subject = SUBJECT_TEXT
-    mail.Body = BODY_TEXT
+
+    mail.Display()
+    mail.HTMLBody = f"<p style='margin:0'>{BODY_TEXT.strip().replace(chr(10), '<br>')}</p>" + mail.HTMLBody
 
     mail.Send()
     print(f"Follow-up sent to {to_address}")
