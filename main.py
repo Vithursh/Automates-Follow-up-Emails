@@ -6,11 +6,11 @@ from datetime import datetime, timedelta
 
 CSV_FILE = "email_tracking.csv"
 CHECK_INTERVAL = 30  # seconds
-FOLLOWUP_TIME_TYPE = "hours" # Change to "days", "hours", or "minutes" exactly
-FOLLOWUP_TIME = 7 # Days, Hours, or Minutes until next follow-up if no response
+FOLLOWUP_TIME_TYPE = "minutes" # Change to "days", "hours", or "minutes" exactly
+FOLLOWUP_TIME = 5 # Days, Hours, or Minutes until next follow-up if no response
 
 SUBJECT_TEXT = "Follow up on the analysis report"
-BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance.\n\nThanks,\nTrench Group"
+BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance."
 
 
 # -------------------------------
@@ -166,86 +166,115 @@ def scan_flagged_emails(df):
     return df
 
 
+def normalize(s):
+    return " ".join(s.split()).lower()
+
+
 # -------------------------------
 # Check if client has already replied
 # -------------------------------
 def check_for_client_reply(row, tracked_recipients):
-    """Check if any tracked recipient has replied to this email thread. If found, unflag the original email in sent folder."""
     try:
+        print(f"\n--- CHECK FOR REPLY ---")
+        print(f"Tracked recipients: {tracked_recipients}")
+        print(f"Looking for subject containing: '{row['subject_line']}'")
+
         inbox = get_outlook_inbox()
         inbox_messages = inbox.Items
-        
+        print(f"Total inbox messages to scan: {len(inbox_messages)}")
+
         for msg_inbox in inbox_messages:
             try:
-                if msg_inbox.Class != 43:  # Mail item only
+                if msg_inbox.Class != 43:
                     continue
-                
+
                 current_sender_obj = getattr(msg_inbox, "Sender", None)
                 if not current_sender_obj:
                     continue
-                
+
                 if msg_inbox.SenderEmailType == "EX":
                     sender = msg_inbox.Sender.GetExchangeUser().PrimarySmtpAddress.lower()
                 else:
                     sender = msg_inbox.SenderEmailAddress.lower()
-                
-                # Check if sender is one of the tracked recipients AND subject matches
-                if sender in tracked_recipients and row['subject_line'] in msg_inbox.Subject:
-                    print(f"Reply detected from {sender} on subject '{msg_inbox.Subject}'")
-                    
-                    # Unflag the original email in sent folder
+
+                # subject_match = row['subject_line'] in msg_inbox.Subject
+
+                subject_match = normalize(row['subject_line']) in normalize(msg_inbox.Subject)
+                sender_match = sender in tracked_recipients
+
+                if subject_match or sender_match:
+                    print(f"  Potential match found:")
+                    print(f"    Sender: {sender}")
+                    print(f"    Subject: {msg_inbox.Subject}")
+                    print(f"    sender_match={sender_match}, subject_match={subject_match}")
+
+                if sender_match and subject_match:
+                    print(f"FULL MATCH — reply detected from {sender}")
                     unflag_sent_email(row, tracked_recipients)
-                    
                     return True
-                    
+
             except Exception as e:
                 print(f"Error checking inbox message: {e}")
-        
+
+        print(f"No reply found for {tracked_recipients}")
         return False
     except Exception as e:
         print(f"Error checking for client reply: {e}")
         return False
 
 
-# -------------------------------
-# Unflag the original email in sent folder
-# -------------------------------
 def unflag_sent_email(row, tracked_recipients):
-    """Find and unflag the original email in the sent folder."""
     try:
+        print(f"\n--- UNFLAG SENT EMAIL ---")
+        print(f"Tracked recipients: {tracked_recipients}")
+        print(f"Subject to match: '{row['subject_line']}'")
+        print(f"Sent date in CSV: {row['sent_date']} (type: {type(row['sent_date'])})")
+
         sent_items = get_outlook_sent_items()
         sent_messages = sent_items.Items
-        
+        print(f"Total sent messages to scan: {len(sent_messages)}")
+
+        stored_sent_date = pd.Timestamp(row['sent_date']).to_pydatetime().replace(tzinfo=None)
+
         for msg_sent in sent_messages:
             try:
-                recipient_email = None
-                if msg_sent.Recipients.Count > 0:
-                    recipient = msg_sent.Recipients.Item(1)
-                    try:
-                        if recipient.AddressEntry.Type == "EX":
-                            recipient_email = recipient.AddressEntry.GetExchangeUser().PrimarySmtpAddress.lower()
-                        else:
-                            recipient_email = recipient.Address.lower()
-                    except:
-                        recipient_email = recipient.Address.lower()
-                else:
+                all_recipients = get_all_recipients(msg_sent)
+                if not all_recipients:
                     continue
-                
+
+                msg_recipients = [e.strip() for e in all_recipients.split(",")]
                 received_time = msg_sent.SentOn
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
-                
-                # Match by recipient, subject, and sent date
-                if recipient_email in tracked_recipients and row['subject_line'] == msg_sent.Subject and row['sent_date'] == received_time:
-                    print(f"Unflagging original email to {recipient_email}...")
+
+                time_diff = abs((received_time - stored_sent_date).total_seconds())
+                subject_matches = row['subject_line'] == msg_sent.Subject
+                recipient_matches = any(r in tracked_recipients for r in msg_recipients)
+                date_matches = time_diff <= 60
+
+                # Print EVERY sent email that partially matches
+                if recipient_matches or subject_matches:
+                    print(f"\n  Candidate sent email:")
+                    print(f"    Recipients: {all_recipients}")
+                    print(f"    Subject: '{msg_sent.Subject}'")
+                    print(f"    SentOn (Outlook): {received_time}")
+                    print(f"    SentOn (CSV):     {stored_sent_date}")
+                    print(f"    Time diff (sec):  {time_diff}")
+                    print(f"    FlagStatus:       {msg_sent.FlagStatus}")
+                    print(f"    recipient_matches={recipient_matches}, subject_matches={subject_matches}, date_matches={date_matches}")
+
+                if recipient_matches and subject_matches and date_matches:
+                    print(f"  >>> UNFLAGGING this email")
                     if msg_sent.Class == 43:
                         msg_sent.ClearTaskFlag()
                         msg_sent.FlagStatus = 0
                         msg_sent.Save()
+                        print(f"  >>> Done. FlagStatus after save: {msg_sent.FlagStatus}")
                     break
-                    
+
             except Exception as e:
-                print(f"Error unflagging sent email: {e}")
+                print(f"Error scanning sent email: {e}")
+
     except Exception as e:
         print(f"Error accessing sent folder: {e}")
 
