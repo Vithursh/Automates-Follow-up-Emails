@@ -9,7 +9,6 @@ CHECK_INTERVAL = 30  # seconds
 FOLLOWUP_TIME_TYPE = "minutes" # Change to "days", "hours", or "minutes" exactly
 FOLLOWUP_TIME = 5 # Days, Hours, or Minutes until next follow-up if no response
 
-SUBJECT_TEXT = "Follow up on the analysis report"
 BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance."
 
 
@@ -283,59 +282,70 @@ def unflag_sent_email(row, tracked_recipients):
 # Send follow-up email
 # -------------------------------
 def send_email(to_address, subject_line, sent_date, index, now, df):
-    outlook = win32com.client.Dispatch("Outlook.Application")
-    mail = outlook.CreateItem(0)
+    try:
+        sent_items = get_outlook_sent_items()
+        messages = sent_items.Items
+        messages.Sort("[ReceivedTime]", True)
 
-    # Replace all commas (",") with semicolons (";")
-    formatted_emails = to_address.replace(",", ";")
+        # CHANGED: split to_address so we can match any one of the recipients
+        tracked_recipients = [e.strip() for e in to_address.split(",")]
 
-    print("The email address is:", formatted_emails)
-    # print("The email type is:", type(to_address))
+        original_msg = None
+        for msg in messages:
+            try:
+                all_recipients = get_all_recipients(msg)
+                if not all_recipients:
+                    continue
 
-    mail.To = formatted_emails  # Outlook handles comma-separated addresses natively
+                msg_recipients = [e.strip() for e in all_recipients.split(",")]
+                received_time = msg.SentOn
+                if received_time.tzinfo is not None:
+                    received_time = received_time.replace(tzinfo=None)
 
-    mail.Display()
-    mail.HTMLBody = f"<p style='margin:0'>{BODY_TEXT.strip().replace(chr(10), '<br>')}</p>" + mail.HTMLBody
+                time_diff = abs((received_time - sent_date).total_seconds())
 
-    mail.Send()
-    print(f"Follow-up sent to {to_address}")
+                # Find the original sent email that matches
+                if msg.Subject == subject_line and any(r in tracked_recipients for r in msg_recipients) and time_diff <= 60:
+                    original_msg = msg
+                    print(f"Found original email to reply to: {subject_line}")
+                    break
 
-    sent_items = get_outlook_sent_items()
-    messages = sent_items.Items
-    messages.Sort("[ReceivedTime]", True)
+            except Exception as e:
+                print(f"Error scanning sent email: {e}")
 
-    # CHANGED: split to_address so we can match any one of the recipients
-    tracked_recipients = [e.strip() for e in to_address.split(",")]
+        if original_msg:
+            # Create a reply to the original email (keeps it in the same thread)
+            reply_mail = original_msg.ReplyAll()
+            
+            # Add follow-up text at the beginning
+            reply_mail.HTMLBody = f"<p style='margin:0'>{BODY_TEXT.strip().replace(chr(10), '<br>')}</p><br>" + reply_mail.HTMLBody
+            
+            # Copy attachments from original email if any
+            if original_msg.Attachments.Count > 0:
+                print(f"Copying {original_msg.Attachments.Count} attachment(s) from original email...")
+                for i in range(1, original_msg.Attachments.Count + 1):
+                    attachment = original_msg.Attachments.Item(i)
+                    # Create a temporary path to save and re-attach
+                    import tempfile
+                    temp_dir = tempfile.gettempdir()
+                    temp_path = os.path.join(temp_dir, attachment.FileName)
+                    attachment.SaveAsFile(temp_path)
+                    reply_mail.Attachments.Add(temp_path)
+            
+            reply_mail.Display()
+            reply_mail.Send()
+            print(f"Follow-up reply sent to {to_address}")
+            
+            # Update the next follow up based on the FOLLOWUP_TIME_TYPE and FOLLOWUP_TIME that was set when the email was flagged
+            df.at[index, "next_followup_due"] = now + timedelta(**{df.at[index, "sent_time_duration_type"]: int(df.at[index, "sent_time_duration_value"])})
+            print(f"For {to_address} and with subject '{subject_line}' setting next follow-up due on {df.at[index, 'next_followup_due']} based on sent_time_duration_type and sent_time_duration_value.")
+            # Store in the CSV for the specific row
+            df.to_csv("email_tracking.csv", index=False)
+        else:
+            print(f"Could not find original email to reply to for subject: {subject_line}")
 
-    for msg in messages:
-        try:
-            recipient_email = None
-            if msg.Recipients.Count > 0:
-                recipient = msg.Recipients.Item(1)
-                try:
-                    if recipient.AddressEntry.Type == "EX":
-                        recipient_email = recipient.AddressEntry.GetExchangeUser().PrimarySmtpAddress.lower()
-                    else:
-                        recipient_email = recipient.Address.lower()
-                except:
-                    recipient_email = recipient.Address.lower()
-            else:
-                continue
-
-            received_time = msg.SentOn
-            if received_time.tzinfo is not None:
-                received_time = received_time.replace(tzinfo=None)
-
-            # CHANGED: check if recipient is in the tracked list, not exact string match
-            if recipient_email in tracked_recipients and msg.Subject == subject_line and sent_date == received_time:
-                # print(f"Found email to {recipient_email} with subject '{subject_line}' — unflagging.")
-                # Update the next follow up based on the FOLLOWUP_TIME_TYPE and FOLLOWUP_TIME that was set when the email was flaggsed
-                df.at[index, "next_followup_due"] = now + timedelta(**{df.at[index, "sent_time_duration_type"]: int(df.at[index, "sent_time_duration_value"])})
-                print(f"For {recipient_email} and with subject '{subject_line}' setting next follow-up due on {df.at[index, 'next_followup_due']} based on sent_time_duration_type and sent_time_duration_value.")
-                # Store in the CSV for the specific row
-                df.to_csv("email_tracking.csv", index=False)
-        except Exception as e:
-            print(f"Error unflagging email: {e}")
+    except Exception as e:
+        print(f"Error sending follow-up reply: {e}")
 
 
 # -------------------------------
