@@ -72,6 +72,10 @@ Before you begin, ensure you have the following installed:
    ```bash
    python main.py
    ```
+   or
+   ```bash
+   py main.py
+   ```
 
 The application will now start monitoring your Outlook Sent Items folder and automatically manage follow-up emails based on your configuration.
 
