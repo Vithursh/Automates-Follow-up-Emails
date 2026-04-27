@@ -81,10 +81,8 @@ To customize the application behavior, open `main.py` in your preferred text edi
 
 ```python
 CHECK_INTERVAL = 30              # Time in seconds between Sent Items scans
-FOLLOWUP_HOURS = 1               # Number of hours before sending a follow-up (current default)
-# FOLLOWUP_DAYS = 7              # Alternative: Number of days before sending a follow-up
-# FOLLOWUP_MINUTES = 5           # Alternative: Number of minutes before sending a follow-up
-SUBJECT_TEXT = "Follow up on the analysis report"  # Subject line for follow-ups
+FOLLOWUP_TIME_TYPE = "days"      # Units of time (current default)
+FOLLOWUP_TIME = 7                # Number of days before sending a follow-up
 BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance.\n\nThanks,\nTrench Group"
 ```
 
@@ -92,73 +90,34 @@ BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when y
 
 The follow-up interval options (hours, minutes, and days) are available for you to use based on your specific needs and use cases. You can switch between any of these intervals depending on how aggressive or lenient you want your follow-up strategy to be.
 
-**Current Configuration:** `FOLLOWUP_HOURS = 1` (follows up after 1 hour)
+**Current Configuration:** `FOLLOWUP_TIME = 7` (follows up after 7 days)
 
 **To change to a different interval:**
-1. Comment out the current interval setting
-2. Uncomment the interval you want to use
-3. Modify the value as needed for your use case
+1. Change `FOLLOWUP_TIME_TYPE` either `days`, `hours` or `minutes`
+2. Change `FOLLOWUP_TIME` to the amount of time based on the unit of time chosen
 
 **Examples:**
 
-- **For hourly follow-ups (aggressive):** Keep `FOLLOWUP_HOURS = 1` uncommented
-- **For daily follow-ups (standard business):** Comment out `FOLLOWUP_HOURS`, uncomment `FOLLOWUP_DAYS = 7`
-- **For quick follow-ups (very aggressive):** Comment out `FOLLOWUP_HOURS`, uncomment `FOLLOWUP_MINUTES = 5`
-
-### Code Modifications for Different Intervals
-
-When you switch between follow-up intervals, you'll need to update two locations in the code:
-
-#### 1. In the `scan_flagged_emails()` function (around line 132):
-
-**For Hours:**
-```python
-"next_followup_due": now + timedelta(hours=FOLLOWUP_HOURS)
-```
-
-**For Days:**
-```python
-"next_followup_due": now + timedelta(days=FOLLOWUP_DAYS)
-```
-
-**For Minutes:**
-```python
-"next_followup_due": now + timedelta(minutes=FOLLOWUP_MINUTES)
-```
-
-#### 2. In the `process_followups()` function (around line 264):
-
-**For Hours:**
-```python
-df.at[index, "next_followup_due"] = now + timedelta(hours=FOLLOWUP_HOURS)
-```
-
-**For Days:**
-```python
-df.at[index, "next_followup_due"] = now + timedelta(days=FOLLOWUP_DAYS)
-```
-
-**For Minutes:**
-```python
-df.at[index, "next_followup_due"] = now + timedelta(minutes=FOLLOWUP_MINUTES)
-```
-
-**Important:** Both locations must use the same interval type for the application to work correctly. If you change the interval in one place, make sure to change it in the other as well.
+- **For hourly follow-ups (aggressive):** Set `FOLLOWUP_TIME = 1` and `FOLLOWUP_TIME_TYPE = "hours"`
+- **For daily follow-ups (standard business):** Set `FOLLOWUP_TIME = 1` and `FOLLOWUP_TIME_TYPE = "days"`
+- **For quick follow-ups (very aggressive):** Set `FOLLOWUP_TIME = 1` and `FOLLOWUP_TIME_TYPE = "minutes"`
 
 ### How It Works
 
 1. **Scanning**: The application scans your Outlook Sent Items folder every 30 seconds for flagged emails
 2. **Tracking**: When a flagged email is found, it records the recipient, subject line, and sent date in `email_tracking.csv`
 3. **Follow-up Scheduling**: The tool schedules the next follow-up based on your configured interval (hours, minutes, or days)
-4. **Sending Follow-ups**: When the scheduled time arrives, an automated follow-up email is sent to the recipient
-5. **Response Detection**: If the recipient responds before the automated follow-up is sent, the email is automatically removed from tracking
-6. **Auto-Unflagging**: After processing, the flag is removed from the original sent email
+4. **Sending Follow-ups**: When the scheduled time arrives, an automated follow-up email is sent to the recipients
+5. **Response Detection**: If the recipients respond before the automated follow-up is sent, the email is automatically removed from tracking
+6. **No Response**: If the recipients do not respond, the script will keep sending the automated email based on the `FOLLOWUP_TIME_TYPE` and `FOLLOWUP_TIME`
+7. **Auto-Unflagging**: After processing, the flag is removed from the original sent email
 
 ### Troubleshooting
 
 - **Outlook COM Error**: Ensure Outlook is installed and running on your system
 - **Permission Issues**: Run Python as Administrator if you encounter permission errors when accessing Outlook
-- **CSV File Issues**: If the tracking CSV becomes corrupted, simply delete `email_tracking.csv` and the application will create a fresh one on the next run
+- **CSV File Issues**: If the tracking CSV becomes corrupted, simply delete `email_tracking.csv` and the application will create a fresh one on the next run, but keep in mind any currently tracked emails will get reset.
 - **Exchange vs SMTP**: The application automatically detects whether recipients use Exchange or SMTP email addresses and handles them accordingly
 - **No Emails Being Tracked**: Ensure you're flagging emails in your Sent Items folder, not the inbox
 - **Follow-ups Not Triggering**: Verify that you've updated both the configuration variable at the top AND both code locations (scan_flagged_emails and process_followups functions) when changing the interval type
+- **Setting Different `FOLLOWUP_TIME_TYPE` Or `FOLLOWUP_TIME`**: Whenever you are changing `FOLLOWUP_TIME_TYPE` Or `FOLLOWUP_TIME` for an exiting flag email or a new email, you must restart the script each time
