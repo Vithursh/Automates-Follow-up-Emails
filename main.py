@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 CSV_FILE = "email_tracking.csv"
 CHECK_INTERVAL = 30  # seconds
-FOLLOWUP_TIME_TYPE = "minutes" # Change to "days", "hours", or "minutes" exactly
-FOLLOWUP_TIME = 5 # Days, Hours, or Minutes until next follow-up if no response
+FOLLOWUP_TIME_TYPE = "days" # Change to "days", "hours", or "minutes" exactly
+FOLLOWUP_TIME = 7 # Days, Hours, or Minutes until next follow-up if no response
 
 BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance."
 
@@ -115,10 +115,14 @@ def scan_flagged_emails(df):
 
                 now = datetime.now().replace(tzinfo=None)
 
-                is_duplicate = (
-                    (df["email"] == recipient_email) &
-                    (df["subject_line"] == msg.Subject) &
-                    (df["sent_date"] == received_time)
+                stored_sent_date = pd.Timestamp(received_time).replace(tzinfo=None)
+
+                is_duplicate = df.apply(
+                    lambda r: (
+                        r["email"] == recipient_email and
+                        r["subject_line"] == msg.Subject and
+                        abs((pd.Timestamp(r["sent_date"]).replace(tzinfo=None) - stored_sent_date).total_seconds()) <= 60
+                    ), axis=1
                 ).any()
 
                 if not is_duplicate:
@@ -145,17 +149,23 @@ def scan_flagged_emails(df):
                 if received_time.tzinfo is not None:
                     received_time = received_time.replace(tzinfo=None)
 
-                is_logged = (
-                    (df["email"] == recipient_email) &
-                    (df["subject_line"] == msg.Subject) &
-                    (df["sent_date"] == received_time)
+                stored_sent_date = pd.Timestamp(received_time).replace(tzinfo=None)
+
+                is_logged = df.apply(
+                    lambda r: (
+                        r["email"] == recipient_email and
+                        r["subject_line"] == msg.Subject and
+                        abs((pd.Timestamp(r["sent_date"]).replace(tzinfo=None) - stored_sent_date).total_seconds()) <= 60
+                    ), axis=1
                 ).any()
 
                 if is_logged:
-                    df = df[~(
-                        (df["email"] == recipient_email) &
-                        (df["subject_line"] == msg.Subject) &
-                        (df["sent_date"] == received_time)
+                    df = df[~df.apply(
+                        lambda r: (
+                            r["email"] == recipient_email and
+                            r["subject_line"] == msg.Subject and
+                            abs((pd.Timestamp(r["sent_date"]).replace(tzinfo=None) - stored_sent_date).total_seconds()) <= 60
+                        ), axis=1
                     )]
                     print(f"Removed {recipient_email} from tracking because it was unflagged.")
 
