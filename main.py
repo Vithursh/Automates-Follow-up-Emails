@@ -9,7 +9,7 @@ CHECK_INTERVAL = 30  # seconds
 FOLLOWUP_TIME_TYPE = "days" # Change to "days", "hours", or "minutes" exactly
 FOLLOWUP_TIME = 7 # Days, Hours, or Minutes until next follow-up if no response
 
-BODY_TEXT = "Hi,\n\njust following up on my previous message. Let me know when you get a chance."
+BODY_TEXT = "Hi,\n\nJust following up on my previous message. Let me know when you get a chance.\n\nThanks,\nTrench Group"
 
 
 # -------------------------------
