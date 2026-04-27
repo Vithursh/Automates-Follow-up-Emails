@@ -32,7 +32,7 @@ The inspiration for this project came from the challenge of managing important e
 - **Response Detection**: Intelligently detects when recipients respond before the automated follow-up is sent and stops the tracking cycle
 - **Auto-Unflagging**: Automatically removes the flag from sent emails once a follow-up is processed
 - **Error Handling**: Robust error handling ensures the automation runs continuously without crashing
-- **Configurable Parameters**: Easily customize follow-up intervals, email subject lines, and body text
+- **Configurable Parameters**: Easily customize follow-up intervals, and body text
 - **Real-time Monitoring**: Checks for flagged emails at regular intervals (default: 30 seconds)
 
 ## Prerequisites
@@ -121,3 +121,4 @@ The follow-up interval options (hours, minutes, and days) are available for you 
 - **No Emails Being Tracked**: Ensure you're flagging emails in your Sent Items folder, not the inbox
 - **Follow-ups Not Triggering**: Verify that you've updated both the configuration variable at the top AND both code locations (scan_flagged_emails and process_followups functions) when changing the interval type
 - **Setting Different `FOLLOWUP_TIME_TYPE` Or `FOLLOWUP_TIME`**: Whenever you are changing `FOLLOWUP_TIME_TYPE` Or `FOLLOWUP_TIME` for an exiting flag email or a new email, you must restart the script each time
+- **Invalid FOLLOWUP_TIME_TYPE Error**: If your terminal displays a message like `ValueError: Invalid FOLLOWUP_TIME_TYPE: 'day'. Must be 'days', 'hours', or 'minutes'.` it means you have not typed the `FOLLOWUP_TIME_TYPE` incorrectly. It has to either be spelled like `days`, `hours` or `minutes` exactly
